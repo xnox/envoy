@@ -50,7 +50,12 @@ const std::string& VersionInfo::buildType() {
 
 const std::string& VersionInfo::sslVersion() {
 #ifdef ENVOY_SSL_VERSION
-  static const std::string ssl_version = ENVOY_SSL_VERSION;
+  #if defined OPENSSL_IS_BORINGSSL || defined OPENSSL_IS_AWSLC
+    static const std::string ssl_version = fmt::format("{}-{}", ENVOY_SSL_VERSION,
+                                                       FIPS_version());
+  #else
+    static const std::string ssl_version = ENVOY_SSL_VERSION;
+  #endif
 #else
   static const std::string ssl_version = "no-ssl";
 #endif
