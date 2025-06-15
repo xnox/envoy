@@ -1,12 +1,31 @@
-From d0588833d3cfa5b3b1b9b4011e68eebd8942eb01 Mon Sep 17 00:00:00 2001
-From: Dimitri John Ledkov <dimitri.ledkov@surgut.co.uk>
-Date: Sun, 15 Jun 2025 20:41:47 +0100
-Subject: [PATCH] Add back support for BORINGSSL_API_VERSION 31
-
----
- quiche/quic/core/crypto/tls_server_connection.cc | 6 ++++++
- 1 file changed, 6 insertions(+)
-
+diff --git a/quiche/quic/core/crypto/quic_crypto_client_config.h b/quiche/quic/core/crypto/quic_crypto_client_config.h
+index 60202948f..b58a5468d 100644
+--- a/quiche/quic/core/crypto/quic_crypto_client_config.h
++++ b/quiche/quic/core/crypto/quic_crypto_client_config.h
+@@ -403,10 +403,12 @@ class QUICHE_EXPORT QuicCryptoClientConfig : public QuicCryptoConfig {
+   bool pad_full_hello() const { return pad_full_hello_; }
+   void set_pad_full_hello(bool new_value) { pad_full_hello_ = new_value; }
+ 
++#if BORINGSSL_API_VERSION >= 27
+   bool alps_use_new_codepoint() const { return alps_use_new_codepoint_; }
+   void set_alps_use_new_codepoint(bool new_value) {
+     alps_use_new_codepoint_ = new_value;
+   }
++#endif  // BORINGSSL_API_VERSION
+ 
+   const QuicSSLConfig& ssl_config() const { return ssl_config_; }
+   QuicSSLConfig& ssl_config() { return ssl_config_; }
+@@ -483,8 +485,10 @@ class QUICHE_EXPORT QuicCryptoClientConfig : public QuicCryptoConfig {
+   bool pad_inchoate_hello_ = true;
+   bool pad_full_hello_ = true;
+ 
++#if BORINGSSL_API_VERSION >= 27
+   // Set whether ALPS uses the new codepoint or not.
+   bool alps_use_new_codepoint_ = false;
++#endif  // BORINGSSL_API_VERSION
+ 
+   // Configs applied to BoringSSL's SSL object. TLS only.
+   QuicSSLConfig ssl_config_;
 diff --git a/quiche/quic/core/crypto/tls_server_connection.cc b/quiche/quic/core/crypto/tls_server_connection.cc
 index 80a3aa79d..39e7dc125 100644
 --- a/quiche/quic/core/crypto/tls_server_connection.cc
@@ -34,6 +53,131 @@ index 80a3aa79d..39e7dc125 100644
  }
  
  void TlsServerConnection::SetClientCertMode(ClientCertMode client_cert_mode) {
--- 
-2.48.1
-
+diff --git a/quiche/quic/core/tls_client_handshaker.cc b/quiche/quic/core/tls_client_handshaker.cc
+index 6dc4ef9f2..b30c90e6e 100644
+--- a/quiche/quic/core/tls_client_handshaker.cc
++++ b/quiche/quic/core/tls_client_handshaker.cc
+@@ -58,14 +58,18 @@ TlsClientHandshaker::TlsClientHandshaker(
+                                    cert_and_key->private_key.private_key());
+     }
+   }
++#if BORINGSSL_API_VERSION >= 22
+   if (!crypto_config->preferred_groups().empty()) {
+     SSL_set1_group_ids(ssl(), crypto_config->preferred_groups().data(),
+                        crypto_config->preferred_groups().size());
+   }
++#endif  // BORINGSSL_API_VERSION
+ 
++#if BORINGSSL_API_VERSION >= 27
+   // Make sure we use the right ALPS codepoint.
+   SSL_set_alps_use_new_codepoint(ssl(),
+                                  crypto_config->alps_use_new_codepoint());
++#endif  // BORINGSSL_API_VERSION
+ }
+ 
+ TlsClientHandshaker::~TlsClientHandshaker() {}
+diff --git a/quiche/quic/core/tls_client_handshaker_test.cc b/quiche/quic/core/tls_client_handshaker_test.cc
+index 675b994f1..5043b12c2 100644
+--- a/quiche/quic/core/tls_client_handshaker_test.cc
++++ b/quiche/quic/core/tls_client_handshaker_test.cc
+@@ -904,6 +904,7 @@ TEST_P(TlsClientHandshakerTest, ECHGrease) {
+   EXPECT_FALSE(stream()->crypto_negotiated_params().encrypted_client_hello);
+ }
+ 
++#if BORINGSSL_API_VERSION >= 22
+ TEST_P(TlsClientHandshakerTest, EnableMLKEM) {
+   crypto_config_->set_preferred_groups({SSL_GROUP_X25519_MLKEM768});
+   server_crypto_config_->set_preferred_groups(
+@@ -916,7 +917,9 @@ TEST_P(TlsClientHandshakerTest, EnableMLKEM) {
+   EXPECT_TRUE(stream()->one_rtt_keys_available());
+   EXPECT_EQ(SSL_GROUP_X25519_MLKEM768, SSL_get_group_id(stream()->GetSsl()));
+ }
++#endif  // BORINGSSL_API_VERSION
+ 
++#if BORINGSSL_API_VERSION >= 27
+ TEST_P(TlsClientHandshakerTest, EnableClientAlpsUseNewCodepoint) {
+   // The intent of this test is to demonstrate the handshake should complete
+   // successfully.
+@@ -943,6 +946,7 @@ TEST_P(TlsClientHandshakerTest, EnableClientAlpsUseNewCodepoint) {
+   EXPECT_EQ(PROTOCOL_TLS1_3, stream()->handshake_protocol());
+   EXPECT_TRUE(callback_ran);
+ }
++#endif  // BORINGSSL_API_VERSION
+ 
+ }  // namespace
+ }  // namespace test
+diff --git a/quiche/quic/core/tls_handshaker.cc b/quiche/quic/core/tls_handshaker.cc
+index 9529230d9..a850c569d 100644
+--- a/quiche/quic/core/tls_handshaker.cc
++++ b/quiche/quic/core/tls_handshaker.cc
+@@ -226,7 +226,11 @@ ssl_early_data_reason_t TlsHandshaker::EarlyDataReason() const {
+ }
+ 
+ const EVP_MD* TlsHandshaker::Prf(const SSL_CIPHER* cipher) {
++#if BORINGSSL_API_VERSION >= 23
+   return SSL_CIPHER_get_handshake_digest(cipher);
++#else
++  return EVP_get_digestbynid(SSL_CIPHER_get_prf_nid(cipher));
++#endif
+ }
+ 
+ enum ssl_verify_result_t TlsHandshaker::VerifyCert(uint8_t* out_alert) {
+diff --git a/quiche/quic/core/tls_server_handshaker.cc b/quiche/quic/core/tls_server_handshaker.cc
+index f59f7bff0..63fdc1295 100644
+--- a/quiche/quic/core/tls_server_handshaker.cc
++++ b/quiche/quic/core/tls_server_handshaker.cc
+@@ -236,10 +236,12 @@ TlsServerHandshaker::TlsServerHandshaker(
+   if (session->connection()->context()->tracer) {
+     tls_connection_.EnableInfoCallback();
+   }
++#if BORINGSSL_API_VERSION >= 22
+   if (!crypto_config->preferred_groups().empty()) {
+     SSL_set1_group_ids(ssl(), crypto_config->preferred_groups().data(),
+                        crypto_config->preferred_groups().size());
+   }
++#endif  // BORINGSSL_API_VERSION
+ }
+ 
+ TlsServerHandshaker::~TlsServerHandshaker() { CancelOutstandingCallbacks(); }
+diff --git a/quiche/quic/core/tls_server_handshaker_test.cc b/quiche/quic/core/tls_server_handshaker_test.cc
+index 2284938cb..893b2a6fa 100644
+--- a/quiche/quic/core/tls_server_handshaker_test.cc
++++ b/quiche/quic/core/tls_server_handshaker_test.cc
+@@ -1217,10 +1217,12 @@ TEST_P(TlsServerHandshakerTest, SuccessWithCustomTranportParam) {
+   ExpectHandshakeSuccessful();
+ }
+ 
+-TEST_P(TlsServerHandshakerTest, EnableMLKEM) {
+-  server_crypto_config_->set_preferred_groups({SSL_GROUP_X25519_MLKEM768});
++#if BORINGSSL_API_VERSION >= 22
++TEST_P(TlsServerHandshakerTest, EnableKyber) {
++  server_crypto_config_->set_preferred_groups(
++      {SSL_GROUP_X25519_KYBER768_DRAFT00});
+   client_crypto_config_->set_preferred_groups(
+-      {SSL_GROUP_X25519_MLKEM768, SSL_GROUP_X25519, SSL_GROUP_SECP256R1,
++      {SSL_GROUP_X25519_KYBER768_DRAFT00, SSL_GROUP_X25519, SSL_GROUP_SECP256R1,
+        SSL_GROUP_SECP384R1});
+ 
+   InitializeServer();
+@@ -1228,10 +1230,12 @@ TEST_P(TlsServerHandshakerTest, EnableMLKEM) {
+   CompleteCryptoHandshake();
+   ExpectHandshakeSuccessful();
+   EXPECT_EQ(PROTOCOL_TLS1_3, server_stream()->handshake_protocol());
+-  EXPECT_EQ(SSL_GROUP_X25519_MLKEM768,
++  EXPECT_EQ(SSL_GROUP_X25519_KYBER768_DRAFT00,
+             SSL_get_group_id(server_stream()->GetSsl()));
+ }
++#endif  // BORINGSSL_API_VERSION
+ 
++#if BORINGSSL_API_VERSION >= 27
+ TEST_P(TlsServerHandshakerTest, AlpsUseNewCodepoint) {
+   const struct {
+     bool client_use_alps_new_codepoint;
+@@ -1266,6 +1270,7 @@ TEST_P(TlsServerHandshakerTest, AlpsUseNewCodepoint) {
+     EXPECT_EQ(PROTOCOL_TLS1_3, server_stream()->handshake_protocol());
+   }
+ }
++#endif  // BORINGSSL_API_VERSION
+ 
+ }  // namespace
+ }  // namespace test
