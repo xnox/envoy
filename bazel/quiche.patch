@@ -123,7 +123,7 @@ index 9529230d9..a850c569d 100644
  
  enum ssl_verify_result_t TlsHandshaker::VerifyCert(uint8_t* out_alert) {
 diff --git a/quiche/quic/core/tls_server_handshaker.cc b/quiche/quic/core/tls_server_handshaker.cc
-index f59f7bff0..63fdc1295 100644
+index f59f7bff0..711c1bc6d 100644
 --- a/quiche/quic/core/tls_server_handshaker.cc
 +++ b/quiche/quic/core/tls_server_handshaker.cc
 @@ -236,10 +236,12 @@ TlsServerHandshaker::TlsServerHandshaker(
@@ -139,6 +139,21 @@ index f59f7bff0..63fdc1295 100644
  }
  
  TlsServerHandshaker::~TlsServerHandshaker() { CancelOutstandingCallbacks(); }
+@@ -944,12 +946,14 @@ ssl_select_cert_result_t TlsServerHandshaker::EarlySelectCertCallback(
+     if (use_alps_new_codepoint == 0) {
+       QUIC_CODE_COUNT(quic_gfe_alps_use_old_codepoint);
+ 
++#if BORINGSSL_API_VERSION >= 27
+       // Record whether the client sets the old alps codepoint extension.
+       if (SSL_early_callback_ctx_extension_get(
+               client_hello, TLSEXT_TYPE_application_settings_old,
+               &unused_extension_bytes, &unused_extension_len)) {
+         QUIC_CODE_COUNT(quic_gfe_alps_old_codepoint_received);
+       }
++#endif  // BORINGSSL_API_VERSION
+     }
+   }
+ 
 diff --git a/quiche/quic/core/tls_server_handshaker_test.cc b/quiche/quic/core/tls_server_handshaker_test.cc
 index 2284938cb..893b2a6fa 100644
 --- a/quiche/quic/core/tls_server_handshaker_test.cc
